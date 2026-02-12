@@ -1,0 +1,74 @@
+﻿
+> charges-breakdown-engine@0.0.0 build
+> vite build
+
+[36mvite v7.3.0 [32mbuilding client environment for production...[36m[39m
+transforming...
+[32mΓ£ô[39m 1110 modules transformed.
+node.exe : [31mΓ£ù[39m Build failed in 
+3.27s
+At C:\Program Files\nodejs\npm.ps1:29 
+char:3
++   & $NODE_EXE $NPM_CLI_JS $args
++   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified 
+   : ([31mΓ£ù[39m Build failed in 3.27s  
+  :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeComman 
+   dError
+ 
+[31merror during build:
+[31msrc/components/Dashboard.jsx (16:4): 
+"getMonthlyTrends" is not exported by 
+"src/logic/firestoreService.js", imported 
+by "src/components/Dashboard.jsx".[31m
+file: [36mC:/Users/Hemhalatha V R/Hackatho
+n/ccp/SettleSync/src/components/Dashboard.j
+sx:16:4[31m
+[33m
+14: import {
+15:     getDashboardStats,
+16:     getMonthlyTrends,
+        ^
+17:     processIncomingWebhook,
+18:     subscribeToTransactions,
+[31m
+    at getRollupError (file:///C:/Users/Hem
+halatha%20V%20R/Hackathon/ccp/SettleSync/no
+de_modules/rollup/dist/es/shared/parseAst.j
+s:401:41)
+    at error (file:///C:/Users/Hemhalatha%2
+0V%20R/Hackathon/ccp/SettleSync/node_module
+s/rollup/dist/es/shared/parseAst.js:397:42)
+    at Module.error (file:///C:/Users/Hemha
+latha%20V%20R/Hackathon/ccp/SettleSync/node
+_modules/rollup/dist/es/shared/node-entry.j
+s:17022:16)
+    at Module.traceVariable (file:///C:/Use
+rs/Hemhalatha%20V%20R/Hackathon/ccp/SettleS
+ync/node_modules/rollup/dist/es/shared/node
+-entry.js:17478:29)
+    at ModuleScope.findVariable (file:///C:
+/Users/Hemhalatha%20V%20R/Hackathon/ccp/Set
+tleSync/node_modules/rollup/dist/es/shared/
+node-entry.js:15141:39)
+    at ReturnValueScope.findVariable (file:
+///C:/Users/Hemhalatha%20V%20R/Hackathon/cc
+p/SettleSync/node_modules/rollup/dist/es/sh
+ared/node-entry.js:5688:38)
+    at FunctionBodyScope.findVariable (file
+:///C:/Users/Hemhalatha%20V%20R/Hackathon/c
+cp/SettleSync/node_modules/rollup/dist/es/s
+hared/node-entry.js:5688:38)
+    at ReturnValueScope.findVariable (file:
+///C:/Users/Hemhalatha%20V%20R/Hackathon/cc
+p/SettleSync/node_modules/rollup/dist/es/sh
+ared/node-entry.js:5688:38)
+    at FunctionBodyScope.findVariable (file
+:///C:/Users/Hemhalatha%20V%20R/Hackathon/c
+cp/SettleSync/node_modules/rollup/dist/es/s
+hared/node-entry.js:5688:38)
+    at Identifier.bind (file:///C:/Users/He
+mhalatha%20V%20R/Hackathon/ccp/SettleSync/n
+ode_modules/rollup/dist/es/shared/node-entr
+y.js:5462:40)[39m

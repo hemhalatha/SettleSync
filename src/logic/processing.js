@@ -1,110 +1,88 @@
 /**
- * Core Processing Logic for Fee Calculation and Attribution
+ * Payment Transparency Engine
+ * Calculates expected fees and classifies discrepancies
  */
 
-export const calculateExpectedFees = (transaction, pricing) => {
-    const { transaction_amount, status } = transaction;
+/**
+ * Processes a single transaction to determine its tax/fee health
+ */
+export const processSingleTransaction = (event, merchantPricing) => {
+    const { mdrPercentage, gstPercentage, refundFee, chargebackFee } = merchantPricing;
+    const isRefund = event.status === 'refund';
 
-    if (status === 'refund') {
-        return {
-            mdr: 0,
-            gst: 0,
-            fixedFees: pricing.refundFee,
-            totalExpectedFee: pricing.refundFee
-        };
+    // 1. Calculate Expected Charges
+    let expectedMdr = 0;
+    let expectedGst = 0;
+    let expectedFixed = 0;
+
+    if (isRefund) {
+        expectedFixed = refundFee || 0;
+    } else {
+        expectedMdr = (event.transaction_amount * mdrPercentage) / 100;
+        expectedGst = (expectedMdr * gstPercentage) / 100;
     }
 
-    if (status === 'chargeback') {
-        return {
-            mdr: 0,
-            gst: 0,
-            fixedFees: pricing.chargebackFee,
-            totalExpectedFee: pricing.chargebackFee
-        };
-    }
+    const expectedDeduction = expectedMdr + expectedGst + expectedFixed;
+    const expectedSettlement = event.transaction_amount - expectedDeduction;
 
-    const mdr = (transaction_amount * pricing.mdrPercentage) / 100;
-    const gst = (mdr * pricing.gstPercentage) / 100;
-    const totalExpectedFee = mdr + gst;
+    // 2. Analyze Discrepancy
+    const settledAmount = event.settled_amount || 0;
+    const actualDeduction = event.transaction_amount - settledAmount;
+    const rawDiff = actualDeduction - expectedDeduction;
+    const difference = Math.abs(rawDiff) < 0.01 ? 0 : rawDiff; // Rounding tolerance
 
-    return {
-        mdr,
-        gst,
-        fixedFees: 0,
-        totalExpectedFee
-    };
-};
+    // 3. Attribution Logic
+    let attribution = 'Correct Settlement';
+    let explanation = 'The settlement amount perfectly matches the agreed pricing rules.';
+    let confidence = 'High';
 
-export const classifyDifference = (transaction, totalDeduction, expectedFee) => {
-    const difference = totalDeduction - expectedFee;
-    const tolerance = 0.01; // Handle small floating point variances
-
-    if (Math.abs(difference) <= tolerance) {
-        return {
-            category: "Correct Settlement",
-            confidence: "High",
-            explanation: "The settlement amount matches the expected amount after standard MDR and GST deductions."
-        };
-    }
-
-    if (transaction.status === 'refund' || transaction.status === 'chargeback') {
-        return {
-            category: "Gateway-side deduction",
-            confidence: "High",
-            explanation: `The deduction of ₹${totalDeduction.toFixed(2)} is attributed to gateway processing fees for ${transaction.status} events.`
-        };
-    }
-
-    if (transaction.payment_method === 'upi' && difference > 0) {
-        return {
-            category: "Anomaly – requires clarification",
-            confidence: "Low",
-            explanation: `Customer paid ₹${transaction.transaction_amount}. UPI transactions usually have zero or minimal MDR. The difference of ₹${difference.toFixed(2)} cannot be determined conclusively.`
-        };
-    }
-
-    if ((transaction.payment_method === 'debit_card' || transaction.payment_method === 'credit_card') && difference > 0) {
-        return {
-            category: "Card network / issuing bank charges",
-            confidence: "Medium",
-            explanation: `₹${difference.toFixed(2)} is attributed to card network or issuing bank charges based on standard domestic card payment rules.`
-        };
-    }
-
-    if ((transaction.payment_method === 'international' || transaction.payment_method === 'emi') && difference > 0) {
-        return {
-            category: "Bank-level FX / EMI charges",
-            confidence: "Medium",
-            explanation: `The additional deduction of ₹${difference.toFixed(2)} is attributed to bank-level foreign exchange (FX) or EMI processing charges.`
-        };
+    if (difference > 0) {
+        if (isRefund) {
+            attribution = 'Additional Refund Fee (Anomaly)';
+            explanation = `The deduction (₹${actualDeduction.toFixed(2)}) exceeded the expected refund fee (₹${expectedDeduction.toFixed(2)}). Possible causes: extra currency conversion or platform-specific penalty.`;
+        } else if (event.payment_method === 'international_card') {
+            attribution = 'Currency Conversion / Cross-border Fee';
+            explanation = `The extra deduction of ₹${difference.toFixed(2)} is likely a currency conversion fee (1-2%) not explicitly mentioned in the base MDR.`;
+        } else if (difference > 100) {
+            attribution = 'Unexplained Anomaly';
+            explanation = 'A significant unexplained deduction was detected. This requires urgent reconciliation with the gateway support team.';
+            confidence = 'Medium';
+        } else {
+            attribution = 'Service Surcharge';
+            explanation = `Minor unexplained deduction of ₹${difference.toFixed(2)}, possibly a platform fee or network surcharge.`;
+            confidence = 'High';
+        }
+    } else if (difference < 0) {
+        attribution = 'Promotional Credit / Waiver';
+        explanation = 'The deduction was less than expected, indicating a possible fee waiver or promotional credit from the gateway.';
     }
 
     return {
-        category: "Unclassified Difference",
-        confidence: "Low",
-        explanation: "The difference cannot be determined conclusively based on available data rules."
+        ...event,
+        expected_deduction: expectedDeduction,
+        actual_deduction: actualDeduction,
+        difference,
+        attribution,
+        explanation,
+        confidence,
+        breakdown: {
+            mdr: expectedMdr,
+            gst: expectedGst,
+            fixedFees: expectedFixed,
+        },
     };
 };
 
+/**
+ * Original batch processing (legacy/utility)
+ */
 export const processTransactions = (webhooks, settlements, pricing) => {
-    return webhooks.map(webhook => {
-        const settlement = settlements.find(s => s.transaction_id === webhook.transaction_id);
-        const settledAmount = settlement ? settlement.settled_amount : 0;
+    return webhooks.map((event) => {
+        // Find matching settlement report for actual_deduction
+        const settlement = settlements.find((s) => s.transaction_id === event.transaction_id);
+        const settled_amount = settlement ? settlement.net_settlement : event.settlement_amount || event.transaction_amount;
 
-        const expected = calculateExpectedFees(webhook, pricing);
-        const actualDeduction = webhook.transaction_amount - settledAmount;
-        const attribution = classifyDifference(webhook, actualDeduction, expected.totalExpectedFee);
-
-        return {
-            ...webhook,
-            settled_amount: settledAmount,
-            expected_deduction: expected.totalExpectedFee,
-            actual_deduction: actualDeduction,
-            difference: actualDeduction - expected.totalExpectedFee,
-            attribution: attribution.category,
-            confidence: attribution.confidence,
-            explanation: attribution.explanation,
-            breakdown: expected
-        };
+        const enrichedEvent = { ...event, settled_amount };
+        return processSingleTransaction(enrichedEvent, pricing);
     });
 };
