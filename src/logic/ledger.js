@@ -17,19 +17,20 @@ export const generateLedgerEntries = (processedTransactions) => {
 
     sorted.forEach((txn) => {
         if (txn.status === 'refund') {
-            // Refund: debit (money going out), then fee debit, then settlement
-            const refundAmount = txn.transaction_amount;
-            runningBalance -= refundAmount;
+            // Refund: money is deducted from balance, then fee, then payout (out of system)
+            // 1. Refund Amount (Debit from account)
+            runningBalance -= txn.transaction_amount;
             entries.push({
                 id: generateId(),
                 txnId: txn.transaction_id,
                 type: 'refund',
                 description: `Refund issued – ${txn.payment_method.replace('_', ' ')} (${txn.order_id})`,
-                amount: -refundAmount,
+                amount: -txn.transaction_amount,
                 runningBalance,
                 timestamp: txn.timestamp,
             });
 
+            // 2. Refund Fee (Debit from account)
             if (txn.breakdown && txn.breakdown.fixedFees > 0) {
                 runningBalance -= txn.breakdown.fixedFees;
                 entries.push({
@@ -43,15 +44,18 @@ export const generateLedgerEntries = (processedTransactions) => {
                 });
             }
 
-            const netSettlement = txn.settled_amount;
-            runningBalance += netSettlement;
+            // 3. Settlement (Money leaving the merchant's escrow/account to customer)
+            // This clears the negative "debt" for this transaction in the ledger
+            // The payout should cover the refund amount plus any fees.
+            const totalToClear = Math.abs(runningBalance);
+            runningBalance += totalToClear;
             entries.push({
                 id: generateId(),
                 txnId: txn.transaction_id,
                 type: 'settlement',
-                description: `Net refund settlement payout`,
-                amount: netSettlement,
-                runningBalance,
+                description: `Refund settlement payout`,
+                amount: -totalToClear, // Displayed as money out in the table
+                runningBalance: Math.abs(runningBalance) < 0.01 ? 0 : runningBalance,
                 timestamp: txn.timestamp,
             });
         } else {
@@ -96,7 +100,7 @@ export const generateLedgerEntries = (processedTransactions) => {
                 });
             }
 
-            // 4. Debit – additional charges (difference beyond expected)
+            // 4. Debit – additional charges
             if (txn.difference > 0.01) {
                 runningBalance -= txn.difference;
                 entries.push({
@@ -110,19 +114,16 @@ export const generateLedgerEntries = (processedTransactions) => {
                 });
             }
 
-            // 5. Settlement – net payout
-            const expectedBalance = txn.settled_amount;
-            const adjustment = expectedBalance - runningBalance;
-            if (Math.abs(adjustment) > 0.01) {
-                runningBalance = expectedBalance;
-            }
+            // 5. Settlement – payout to bank account
+            const totalAvailable = Math.abs(runningBalance);
+            runningBalance -= totalAvailable;
             entries.push({
                 id: generateId(),
                 txnId: txn.transaction_id,
                 type: 'settlement',
-                description: `Net settlement payout to merchant`,
-                amount: txn.settled_amount,
-                runningBalance,
+                description: `Net payout to bank account`,
+                amount: totalAvailable,
+                runningBalance: Math.abs(runningBalance) < 0.01 ? 0 : runningBalance,
                 timestamp: txn.timestamp,
             });
         }
@@ -138,12 +139,12 @@ export const getLedgerEntriesForTransaction = (allEntries, txnId) => {
 export const validateLedgerBalance = (entries, txnId) => {
     const txnEntries = entries.filter((e) => e.txnId === txnId);
     const credits = txnEntries.filter((e) => e.type === 'credit').reduce((s, e) => s + e.amount, 0);
-    const debits = txnEntries.filter((e) => e.type === 'debit').reduce((s, e) => s + Math.abs(e.amount), 0);
-    const settlement = txnEntries.filter((e) => e.type === 'settlement').reduce((s, e) => s + e.amount, 0);
+    const debits = txnEntries.filter((e) => e.type === 'debit' || e.type === 'refund').reduce((s, e) => s + e.amount, 0);
+    const settlement = txnEntries.filter((e) => e.type === 'settlement').reduce((s, e) => s + Math.abs(e.amount), 0);
     return {
         credits,
         debits,
         settlement,
-        balanced: Math.abs(credits - debits - settlement) < 0.02,
+        balanced: Math.abs(credits + debits - settlement) < 0.02,
     };
 };

@@ -46,3 +46,39 @@ Achieved classifications are accompanied by a confidence level (High, Medium, or
 -   **Frontend**: React (Vite) with a modern CSS glassmorphism design system.
 -   **Logic**: JavaScript-based reconciliation and attribution engine.
 -   **Data Model**: Extensible schemas for Webhooks, Settlements, and Pricing.
+    
+## Getting Started
+
+### Prerequisites
+- [Node.js](https://nodejs.org/) (v18 or higher recommended)
+- [npm](https://www.npmjs.com/) (usually comes with Node.js)
+
+### Installation
+1.  Clone the repository or download the source code.
+2.  Navigate to the project directory:
+    ```bash
+    cd SettleSync
+    ```
+3.  Install dependencies:
+    ```bash
+    npm install
+    ```
+
+### Running the Application
+
+1.  **Start the development server:**
+    ```bash
+    npm run dev
+    ```
+    The application will be available at `http://localhost:5173`.
+
+2.  **Build for production:**
+    ```bash
+    npm run build
+    ```
+    The production-ready files will be generated in the `dist` directory.
+
+3.  **Preview the production build:**
+    ```bash
+    npm run preview
+    ```

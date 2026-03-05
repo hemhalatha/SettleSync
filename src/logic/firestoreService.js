@@ -1,6 +1,9 @@
 /**
  * Firestore Service Layer
  * Provides real-time synchronization and transaction processing.
+ * 
+ * IMPORTANT: Mock data is cached once at module level so every page
+ * sees the same data. This prevents the "data changes page to page" bug.
  */
 import {
     db,
@@ -29,17 +32,28 @@ const COLLECTIONS = {
     LEDGER: 'ledger'
 };
 
+export const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:3001';
+
+// ─── Cached Mock Data (processed ONCE, shared across all pages) ────
+let _cachedMockData = null;
+function getCachedMockData() {
+    if (!_cachedMockData) {
+        _cachedMockData = processTransactions(webhookEvents, settlementReports, merchantPricing);
+    }
+    return _cachedMockData;
+}
+
 // ─── Real-time Listeners ────────────────────────────────────
 
 /**
- * Subscribes to high-fidelity transaction updates
+ * Subscribes to transaction updates.
+ * With Firebase: real-time from Firestore.
+ * Without Firebase: returns cached mock data (same every time).
  */
 export const subscribeToTransactions = (userId, callback) => {
     if (!isFirebaseConfigured()) {
-        // Fallback: return mock data immediately
-        const mock = processTransactions(webhookEvents, settlementReports, merchantPricing);
-        callback(mock);
-        return () => { }; // No-op unsubscription
+        callback(getCachedMockData());
+        return () => { };
     }
 
     const q = query(
@@ -55,7 +69,7 @@ export const subscribeToTransactions = (userId, callback) => {
 };
 
 /**
- * Subscribes to merchant profile (bank details, pricing)
+ * Subscribes to merchant profile
  */
 export const subscribeToMerchantProfile = (userId, callback) => {
     if (!isFirebaseConfigured()) {
@@ -152,18 +166,30 @@ export const updateMerchantDetails = async (userId, details) => {
     return details;
 };
 
-// ─── Legacy/Local Getters (for compatibility during dev) ─────
+// ─── Legacy/Local Getters (use cached data for consistency) ──
 export const getProcessedTransactions = () => {
-    return processTransactions(webhookEvents, settlementReports, merchantPricing);
+    return getCachedMockData();
 };
 
 export const getDashboardStats = (data = []) => {
-    const transactions = data.length > 0 ? data : getProcessedTransactions();
+    const transactions = Array.isArray(data) && data.length > 0 ? data : getProcessedTransactions();
+
     const totalTxns = transactions.length;
-    const totalVolume = transactions.reduce((s, t) => s + t.transaction_amount, 0);
-    const totalSettled = transactions.reduce((s, t) => s + t.settled_amount, 0);
-    const totalDeductions = transactions.reduce((s, t) => s + t.actual_deduction, 0);
-    const anomalies = transactions.filter((t) => t.attribution.includes('Anomaly')).length;
+
+    // Total Volume: Sales minus Refunds
+    const totalVolume = transactions.reduce((s, t) => {
+        if (t.status === 'refund') return s - (Number(t.transaction_amount) || 0);
+        return s + (Number(t.transaction_amount) || 0);
+    }, 0);
+
+    // Total Settled: Net sum of payouts (Positive bank deposits - Negative refund payouts)
+    const totalSettled = transactions.reduce((s, t) => {
+        if (t.status === 'refund') return s - (Number(t.settled_amount) || 0);
+        return s + (Number(t.settled_amount) || 0);
+    }, 0);
+
+    const totalDeductions = transactions.reduce((s, t) => s + (Number(t.actual_deduction) || 0), 0);
+    const anomalies = transactions.filter((t) => (t.attribution || '').includes('Anomaly')).length;
 
     return { totalTxns, totalVolume, totalSettled, totalDeductions, anomalies };
 };
@@ -195,14 +221,53 @@ export const filterTransactions = (data, filters = {}) => {
     return filtered;
 };
 export const getMonthlyTrends = (data = []) => {
-    // In a real app, this would perform a time-series aggregation in Firestore
-    // For this demo, we use a mix of real data and mock trends
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
-    return months.map((month, i) => ({
-        month,
-        volume: 4000 + Math.random() * 2000 + (data.length * 10),
-        settled: 3800 + Math.random() * 1800 + (data.length * 9),
-    }));
+    const transactions = Array.isArray(data) && data.length > 0 ? data : getProcessedTransactions();
+
+    // Group transactions by month
+    const monthMap = {};
+    transactions.forEach((t) => {
+        const date = new Date(t.timestamp);
+        const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+        const label = date.toLocaleString('en-US', { month: 'short' });
+        if (!monthMap[key]) {
+            monthMap[key] = { month: label, volume: 0, settled: 0, fees: 0 };
+        }
+        const amount = Number(t.transaction_amount) || 0;
+        const settled = Number(t.settled_amount) || 0;
+
+        if (t.status === 'refund') {
+            monthMap[key].volume -= amount;
+        } else {
+            monthMap[key].volume += amount;
+        }
+
+        if (t.status === 'refund') {
+            monthMap[key].settled -= settled;
+        } else {
+            monthMap[key].settled += settled;
+        }
+        monthMap[key].fees += Number(t.actual_deduction) || 0;
+    });
+
+    const sorted = Object.keys(monthMap).sort();
+    if (sorted.length > 0) {
+        return sorted.map((k) => ({
+            month: monthMap[k].month,
+            volume: Math.round(monthMap[k].volume * 100) / 100,
+            settled: Math.round(monthMap[k].settled * 100) / 100,
+            fees: Math.round(monthMap[k].fees * 100) / 100,
+        }));
+    }
+
+    // Fallback: return consistent sample data (no randomness)
+    return [
+        { month: 'Jan', volume: 24700, settled: 23596, fees: 1104 },
+        { month: 'Feb', volume: 28100, settled: 26874, fees: 1226 },
+        { month: 'Mar', volume: 31400, settled: 30042, fees: 1358 },
+        { month: 'Apr', volume: 27800, settled: 26596, fees: 1204 },
+        { month: 'May', volume: 33200, settled: 31762, fees: 1438 },
+        { month: 'Jun', volume: 29500, settled: 28228, fees: 1272 },
+    ];
 };
 
 export const getDeductionCategories = (data = []) => {
@@ -221,7 +286,7 @@ export const getDeductionCategories = (data = []) => {
 };
 
 export const getPaymentMethodDistribution = (data = []) => {
-    const transactions = data.length > 0 ? data : getProcessedTransactions();
+    const transactions = Array.isArray(data) && data.length > 0 ? data : getProcessedTransactions();
     const methods = {};
 
     transactions.forEach(t => {
@@ -229,7 +294,7 @@ export const getPaymentMethodDistribution = (data = []) => {
         if (!methods[method]) {
             methods[method] = { name: method.replace('_', ' '), value: 0, count: 0 };
         }
-        methods[method].value += t.transaction_amount;
+        methods[method].value += (Number(t.transaction_amount) || 0);
         methods[method].count += 1;
     });
 

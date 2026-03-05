@@ -4,7 +4,6 @@
  */
 import {
     auth,
-    db,
     isFirebaseConfigured
 } from '../firebase';
 import {
@@ -43,6 +42,18 @@ export const loginUser = async (identifier, password) => {
         }
     }
 
+    // Demo account shortcut — bypasses signup, goes straight to dashboard
+    if ((identifier === 'hemhalatha' || identifier === 'demo') && (password === 'welcome' || password === 'demo')) {
+        const demoSession = {
+            username: 'hemhalatha',
+            email: 'hemhalatha@settlesync.demo',
+            onboarded: true,
+            bankDetails: { bankName: 'HDFC Bank', accountNumber: '123456789012', ifscCode: 'HDFC0001234' }
+        };
+        localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(demoSession));
+        return demoSession;
+    }
+
     // Local Storage Mock Auth
     const users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
     const user = users.find(
@@ -62,21 +73,16 @@ export const loginUser = async (identifier, password) => {
  */
 export const signupUser = async (username, email, password) => {
     if (isFirebaseConfigured()) {
-        try {
-            const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-            const user = userCredential.user;
-            const session = {
-                uid: user.uid,
-                email: user.email,
-                username: username,
-                onboarded: false
-            };
-            localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(session));
-            await seedInitialData(user.uid);
-            return session;
-        } catch (error) {
-            throw error;
-        }
+        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        const user = userCredential.user;
+        const session = {
+            uid: user.uid,
+            email: user.email,
+            username: username,
+            onboarded: false
+        };
+        await seedInitialData(user.uid);
+        return session;
     }
 
     const users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
@@ -104,28 +110,36 @@ export const getCurrentUser = () => {
     return userJson ? JSON.parse(userJson) : null;
 };
 
-export const updateOnboarding = async (bankDetails) => {
+export const updateOnboarding = async (gatewayConfig) => {
     const currentUser = getCurrentUser();
     if (!currentUser) return null;
 
     if (isFirebaseConfigured()) {
         // Here you would update Firestore profile
-        // For now we just update local session
     }
 
     const users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
     const userIndex = users.findIndex((u) => u.username === currentUser.username || u.uid === currentUser.uid);
 
+    const sessionUpdate = {
+        onboarded: true,
+        gatewayProvider: gatewayConfig.gatewayProvider || 'Razorpay',
+        gatewayKeyId: gatewayConfig.gatewayKeyId || '',
+        webhookUrl: gatewayConfig.webhookUrl || '',
+    };
+
     if (userIndex !== -1) {
-        users[userIndex].onboarded = true;
-        users[userIndex].bankDetails = bankDetails;
+        users[userIndex] = { ...users[userIndex], ...sessionUpdate };
         localStorage.setItem(USERS_KEY, JSON.stringify(users));
         const session = { ...users[userIndex] };
         delete session.password;
         localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(session));
         return session;
     }
-    return null;
+
+    const updatedSession = { ...currentUser, ...sessionUpdate };
+    localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(updatedSession));
+    return updatedSession;
 };
 
 // Initial state listener
