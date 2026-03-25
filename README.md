@@ -12,6 +12,57 @@ The platform operates on a "Transparency First" principle, ensuring that all exp
 2.  **Settlement Reports**: Containing the final amount settled to the merchant's account.
 3.  **Merchant Pricing Configuration**: Defining MDR percentages, GST, and fixed fees for refunds or chargebacks.
 
+## System Architecture
+
+The following diagram illustrates the high-level architecture of SettleSync, showing the flow of data from external payment gateways through the processing engine to the real-time frontend.
+
+```mermaid
+graph TD
+    subgraph "External Systems"
+        PG["Razorpay (Payment Gateway)"]
+        Bank["Merchant Bank Account"]
+    end
+
+    subgraph "SettleSync Backend (Node.js/Express)"
+        Webhook["Webhook Handler (/webhooks/razorpay)"]
+        Engine["Reconciliation & Attribution Engine"]
+        SimApi["Simulation API (/api/simulate)"]
+    end
+
+    subgraph "Firebase Cloud Services"
+        Auth["Firebase Authentication"]
+        Firestore[("Cloud Firestore")]
+    end
+
+    subgraph "SettleSync Frontend (React + Vite)"
+        UI["UI Components (Dashboard, Ledger, Reports)"]
+        FService["Firestore Service (Real-time Sync)"]
+        LocalLogic["Local Reconciliation Logic"]
+    end
+
+    %% Data Flow
+    PG -- "Webhook (Payment/Refund Event)" --> Webhook
+    Webhook --> Engine
+    Engine -- "Processed & Attributed Transaction" --> Firestore
+
+    %% Frontend Interactions
+    UI --> FService
+    FService -- "onSnapshot (Real-time Updates)" --- Firestore
+    UI -- "Manual Simulation" --> SimApi
+    SimApi --> Engine
+    
+    %% Bank Settlement Flow
+    PG -- "Settlement Info" --> Bank
+    Engine -- "Discrepancy Analysis" --> UI
+```
+
+### Core Components
+
+- **Frontend**: A modern React application built with Vite, utilizing a glassmorphism design system. It synchronizes with Firestore in real-time to provide instant updates on transaction processing.
+- **Backend**: A Node.js/Express server that acts as the entry point for payment gateway webhooks. it performs signature verification, applies the reconciliation engine, and persists data to Firebase.
+- **Processing Engine**: The heart of the platform, it calculates expected fees based on merchant pricing and attributes any variances to specific causes with associated confidence levels.
+- **Firebase**: Provides secure authentication and a scalable NoSQL database (Firestore) for storing processed transactions and merchant profiles.
+
 ## Operational Workflow
 
 ### Step 1: Transaction Ledger Creation
